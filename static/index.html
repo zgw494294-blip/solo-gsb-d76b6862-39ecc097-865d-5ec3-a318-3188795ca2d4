@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>舞台排演提示单</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">🎭</span>
+    <div>
+      <h1>舞台排演提示单</h1>
+      <p class="subtitle">Cue Sheet · 依赖级联排程与冲突检测</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <label class="tool">
+      部门
+      <select id="deptFilter"><option value="">全部部门</option></select>
+    </label>
+    <div class="tool zoom-tool">
+      <button id="zoomOut" type="button" title="缩小">−</button>
+      <input id="zoomRange" type="range" min="1" max="40" step="1" value="6"
+             aria-label="时间轴缩放" />
+      <button id="zoomIn" type="button" title="放大">＋</button>
+      <button id="zoomFit" type="button" title="适配全部">适配</button>
+      <span class="zoom-label"><span id="zoomVal">6</span> px/秒</span>
+    </div>
+    <button id="addBtn" class="primary" type="button">＋ 新增提示</button>
+    <a class="nav-link" href="/console">🎬 排演执行台</a>
+  </div>
+</header>
+
+<div id="conflictBanner" class="conflict-banner hidden"></div>
+
+<main>
+  <section class="panel timeline-panel">
+    <div class="panel-head">
+      <h2>时间轴</h2>
+      <span class="legend">
+        <i class="sw sw-normal"></i>普通
+        <i class="sw sw-locked"></i>锁定开场
+        <i class="sw sw-chain"></i>冲突链
+        <i class="sw sw-edge"></i>依赖
+        <i class="sw sw-conflict-edge"></i>冲突依赖
+      </span>
+    </div>
+    <div id="timelineScroll" class="timeline-scroll">
+      <div id="timelineInner" class="timeline-inner">
+        <div id="ruler" class="ruler"></div>
+        <div id="grid" class="grid-layer"></div>
+        <svg id="edgeSvg" class="edge-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="tracks" class="tracks"></div>
+        <div id="emptyHint" class="empty-hint hidden">暂无提示，点击右上角「新增提示」开始排演</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel table-panel">
+    <div class="panel-head"><h2>提示列表</h2><span id="rowCount" class="muted"></span></div>
+    <div class="table-wrap">
+      <table id="cueTable">
+        <thead>
+          <tr>
+            <th>#</th><th>部门</th><th>名称</th>
+            <th>开始</th><th>结束</th><th>时长</th>
+            <th>前置（延迟）</th><th>状态</th><th class="op-col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="cueTbody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- 编辑弹窗 -->
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitle">新增提示</h3>
+    <form id="cueForm">
+      <div class="form-grid">
+        <label>部门
+          <input type="text" id="fDepartment" list="deptList" required
+                 maxlength="80" placeholder="灯光 / 音响 / 舞监…" />
+          <datalist id="deptList"></datalist>
+        </label>
+        <label>名称
+          <input type="text" id="fName" required maxlength="120" placeholder="如：第一幕灯光" />
+        </label>
+        <label>时长（秒）
+          <input type="number" id="fDuration" required min="0" step="0.1" />
+        </label>
+        <label>锁定开场秒数（可选）
+          <input type="number" id="fLocked" min="0" step="0.1"
+                 placeholder="留空 = 按依赖自动推算" />
+        </label>
+        <label class="span2">排序权重
+          <input type="number" id="fSort" value="0" step="1" />
+        </label>
+      </div>
+
+      <div class="dep-head">
+        <span>前置提示与延迟</span>
+        <button type="button" id="addDepBtn" class="ghost">＋ 添加前置</button>
+      </div>
+      <div id="depRows"></div>
+      <p class="hint">未锁定时，开始时间 = 所有前置「结束 + 延迟」的最大值。
+        保存时若新增依赖形成环将被拒绝。</p>
+
+      <div id="formError" class="form-error hidden"></div>
+      <div class="modal-actions">
+        <button type="button" id="cancelBtn" class="ghost">取消</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

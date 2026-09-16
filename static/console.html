@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>排演执行台 · 舞台排演提示单</title>
+<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/console.css" />
+</head>
+<body class="console-page">
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">🎬</span>
+    <div>
+      <h1>排演执行台</h1>
+      <p class="subtitle">Rehearsal Console · 开场冻结快照，按依赖与场钟推进提示</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <a class="nav-link" href="/">← 返回提示单</a>
+  </div>
+</header>
+
+<main>
+  <!-- 无场次 -->
+  <section id="idlePanel" class="panel idle-panel hidden">
+    <div class="idle-inner">
+      <div class="idle-mark">🎬</div>
+      <h2>当前没有进行中的排演</h2>
+      <p class="muted">开始一场排演时会立即冻结当前的提示、依赖与计划时间；
+        此后编辑提示单不影响本场快照。同一时刻只允许一场进行中的排演。</p>
+      <div class="idle-actions">
+        <input type="text" id="runNote" maxlength="200"
+               placeholder="本场备注（可选，如：9月16日 带妆联排）" />
+        <button id="startRunBtn" class="primary" type="button">▶ 开始一场排演</button>
+      </div>
+      <div id="idleError" class="form-error hidden"></div>
+    </div>
+  </section>
+
+  <!-- 进行中 / 已结束 -->
+  <section id="runPanel" class="hidden">
+    <div class="run-dashboard panel">
+      <div class="dash-main">
+        <div class="dash-title">
+          <span id="runBadge" class="run-badge">进行中</span>
+          <h2 id="runTitle">第 1 场排演</h2>
+          <span id="runNoteText" class="run-note"></span>
+        </div>
+        <div class="dash-meta">
+          <span>开场时刻 <strong id="wallOpen">--:--:--</strong></span>
+          <span>提示进度
+            <strong id="progressText">0 / 0</strong></span>
+        </div>
+      </div>
+      <div class="dash-clock">
+        <div class="clock-label">场钟（相对本场起点）</div>
+        <div id="fieldClock" class="field-clock">00:00.0</div>
+        <button id="endRunBtn" class="danger-ghost" type="button">■ 结束本场</button>
+      </div>
+    </div>
+
+    <div id="frozenHint" class="frozen-hint">
+      🔒 本场快照已冻结：计划时间取自开场瞬间的提示单，当前对
+      <a href="/">提示单</a> 的增删改不会影响本场。
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>提示执行</h2>
+        <span class="legend">
+          <i class="st st-waiting"></i>等待
+          <i class="st st-ready"></i>就绪
+          <i class="st st-running"></i>执行中
+          <i class="st st-done"></i>已完成
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table id="runTable">
+          <thead>
+            <tr>
+              <th>#</th><th>部门</th><th>名称</th>
+              <th>计划开始</th><th>实际开始</th><th>开始偏差</th>
+              <th>计划结束</th><th>实际结束</th><th>结束偏差</th>
+              <th>状态</th><th class="op-col">操作</th>
+            </tr>
+          </thead>
+          <tbody id="runTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/console.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+services:
+  cue-sheet:
+    build: .
+    image: stage-cue-sheet:latest
+    container_name: stage-cue-sheet
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+    environment:
+      # 容器内监听地址 / 端口（一般无需修改）
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      # SQLite 数据库文件路径（位于挂载卷内，刷新 / 重启不丢数据）
+      CUE_DB_PATH: "/data/cues.db"
+      # 首次启动且库为空时写入演示数据：1=开启，0=关闭
+      SEED_DEMO: "${SEED_DEMO:-1}"
+    volumes:
+      - cue-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  cue-data:
