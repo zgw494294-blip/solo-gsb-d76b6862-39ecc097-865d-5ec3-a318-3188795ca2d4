@@ -220,6 +220,42 @@
     return `<span class="state-chip waiting"><i class="st st-waiting"></i>等待${cd}</span>`;
   }
 
+  const MEDIA_ICON = { image: "🖼", audio: "🎵", video: "🎬" };
+
+  function mediaCell(c) {
+    const media = c.media || [];
+    if (!media.length) return '<span class="muted">—</span>';
+    return `<span class="media-mini">${media.map((m) => {
+      const cls = m.ready ? "media-chip ready" : "media-chip notready";
+      const title = `${m.name}（${m.status === "ok" ? "就绪" : "未就绪：" + m.status}）`;
+      if (!m.ready)
+        return `<span class="${cls}" title="${escapeHtml(title)}">${MEDIA_ICON[m.kind] || "📄"}⚠</span>`;
+      return `<a class="${cls}" href="${m.url}" data-media="${m.kind}"
+        data-name="${escapeAttr(m.name)}" title="${escapeAttr(title)}">${MEDIA_ICON[m.kind] || "📄"}</a>`;
+    }).join("")}</span>`;
+  }
+
+  function openMediaPreview(kind, url, name) {
+    let inner;
+    if (kind === "image") inner = `<img src="${url}" alt="">`;
+    else if (kind === "video") inner = `<video src="${url}" controls autoplay></video>`;
+    else inner = `<audio src="${url}" controls autoplay></audio>`;
+    const ov = document.createElement("div");
+    ov.className = "modal-overlay";
+    ov.style.cssText = "z-index:200;padding:5vh 16px";
+    ov.innerHTML = `<div class="modal preview-modal" style="width:min(720px,94vw)">
+      <h3>${escapeHtml(name)}</h3>
+      <div class="preview-body" style="margin:10px 0;display:flex;justify-content:center;background:#000;border-radius:8px;overflow:hidden">${inner}</div>
+      <div class="modal-actions"><button type="button" class="primary">关闭</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    const close = () => { ov.remove(); };
+    ov.addEventListener("click", (e) => { if (e.target === ov || e.target.closest("button")) close(); });
+    document.addEventListener("keydown", function esc(e) {
+      if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
+    });
+  }
+
   function renderTable() {
     const run = state.run;
     const active = run.status === "running";
@@ -273,6 +309,7 @@
         <td class="num">${fmtTime(c.end)}</td>
         <td class="num">${actualEnd}</td>
         <td>${fmtSigned(endDev)}${liveTag}</td>
+        <td>${mediaCell(c)}</td>
         <td>${statusChip(st, readyIn)}</td>
         <td class="op-col"><span class="row-ops">${op}</span></td>
       </tr>`;
@@ -403,6 +440,13 @@
     $("#startRunBtn").addEventListener("click", startRun);
     $("#endRunBtn").addEventListener("click", endOrRestart);
     document.addEventListener("click", (e) => {
+      const media = e.target.closest("[data-media]");
+      if (media) {
+        e.preventDefault();
+        openMediaPreview(media.dataset.media, media.getAttribute("href"),
+                         media.dataset.name);
+        return;
+      }
       const s = e.target.closest("[data-start]");
       const c = e.target.closest("[data-complete]");
       if (s) cueAction("start", Number(s.dataset.start));

@@ -82,6 +82,44 @@ CREATE INDEX IF NOT EXISTS idx_run_deps_run ON run_deps(run_id);
 -- 数据库级保证：同一时刻最多一场进行中的排演（部分唯一索引）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_single_active
     ON runs(status) WHERE status = 'running';
+
+-- ------------------------------------------------------------ 提示素材库
+-- 素材实体（按 SHA-256 去重）：相同文件只保存一份物理副本，
+-- 物理路径 = 媒体根目录 / sha前2位 / sha前4位 / sha.ext
+-- status: ok=就绪，missing=实体文件缺失，corrupt=大小或哈希不符
+CREATE TABLE IF NOT EXISTS media_entities (
+    sha256     TEXT PRIMARY KEY,
+    ext        TEXT NOT NULL,             -- 规范扩展名（含点，小写）
+    kind       TEXT NOT NULL CHECK(kind IN ('image','audio','video')),
+    size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+    status     TEXT NOT NULL DEFAULT 'ok'
+               CHECK(status IN ('ok','missing','corrupt')),
+    checked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 素材条目：同哈希实体可对应多个条目（不同名称 / 多次上传）
+CREATE TABLE IF NOT EXISTS media_items (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_sha    TEXT NOT NULL REFERENCES media_entities(sha256) ON DELETE RESTRICT,
+    name          TEXT NOT NULL,          -- 素材库内显示名
+    original_name TEXT NOT NULL,          -- 上传时的原始文件名
+    mime_type     TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_items_entity ON media_items(entity_sha);
+
+-- 提示与素材条目的绑定（多对多）。提示删除 -> 级联解绑；
+-- 被提示引用的条目数据库层亦禁止删除（应用层先返回 409）。
+CREATE TABLE IF NOT EXISTS cue_media (
+    cue_id        INTEGER NOT NULL REFERENCES cues(id) ON DELETE CASCADE,
+    media_item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE RESTRICT,
+    bound_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (cue_id, media_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cue_media_item ON cue_media(media_item_id);
 """
 
 

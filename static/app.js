@@ -6,9 +6,11 @@
 
   const state = {
     schedule: { cues: [], edges: [], conflicts: [] },
+    media: { items: [] },       // 素材库条目（用于编辑弹窗选择）
     pps: Number(localStorage.getItem("cue_pps")) || 6, // 每秒像素
     deptFilter: localStorage.getItem("cue_dept") || "",
     editingId: null,
+    editingMedia: [],          // 编辑弹窗内已选素材 item_id
     // 渲染后缓存：cueId -> { y, barX1, barX2 }
     geo: new Map(),
   };
@@ -60,10 +62,32 @@
 
   const cueById = (id) => state.schedule.cues.find((c) => c.id === id);
 
+  const MEDIA_ICON = { image: "🖼", audio: "🎵", video: "🎬" };
+
+  function mediaCell(c) {
+    const media = c.media || [];
+    if (!media.length) return '<span class="muted">—</span>';
+    const ready = media.every((m) => m.ready);
+    const cls = ready ? "media-chip ready" : "media-chip notready";
+    const title = ready
+      ? media.map((m) => `${MEDIA_ICON[m.kind] || "📄"} ${m.name}`).join("\n")
+      : media.map((m) => `${MEDIA_ICON[m.kind] || "📄"} ${m.name}` +
+          (m.ready ? "" : "（未就绪）")).join("\n");
+    const bad = media.filter((m) => !m.ready).length;
+    return `<span class="${cls}" title="${escapeAttr(title)}">
+      ${ready ? "🎞" : "⚠"} ${media.length}${bad ? `/${media.length - bad}就绪` : ""}
+    </span>`;
+  }
+
   // ----------------------------------------------------------- 数据加载
 
   async function reload() {
-    state.schedule = await api("/api/schedule");
+    const [sched, media] = await Promise.all([
+      api("/api/schedule"),
+      api("/api/media").catch(() => ({ items: [] })),
+    ]);
+    state.schedule = sched;
+    state.media = media;
     renderAll();
   }
 
@@ -282,6 +306,7 @@
         <td class="num">${fmtTime(c.end)}</td>
         <td class="num">${fmtDur(c.duration)}</td>
         <td>${deps || '<span class="muted">无（开场）</span>'}</td>
+        <td>${mediaCell(c)}</td>
         <td>${status}</td>
         <td class="op-col">
           <span class="row-ops">
@@ -317,8 +342,40 @@
     } else {
       addDepRow(null, 0);
     }
+
+    // 素材绑定：初始化为该提示已绑定的条目 id
+    state.editingMedia = cue ? (cue.media || []).map((m) => m.item_id) : [];
+    renderMediaPicker();
+
     $("#modalOverlay").classList.remove("hidden");
     setTimeout(() => $("#fDepartment").focus(), 30);
+  }
+
+  function renderMediaPicker() {
+    const select = $("#mediaSelect");
+    const bound = new Set(state.editingMedia);
+    const available = state.media.items.filter((m) => !bound.has(m.id));
+    select.innerHTML = '<option value="">从素材库选择素材…</option>' +
+      available.map((m) => `<option value="${m.id}">
+        ${MEDIA_ICON[m.kind] || "📄"} ${escapeHtml(m.name)}
+        ${m.ready ? "" : "（未就绪）"} · ${m.sha256.slice(0, 8)}</option>`).join("");
+    const chips = $("#mediaChips");
+    chips.innerHTML = state.editingMedia.map((id) => {
+      const m = state.media.items.find((x) => x.id === id);
+      if (!m) return "";
+      const cls = m.ready ? "media-chip ready" : "media-chip notready";
+      return `<span class="${cls}">${MEDIA_ICON[m.kind] || "📄"} ${escapeHtml(m.name)}
+        ${m.ready ? "" : " ⚠"}
+        <button type="button" class="chip-x" data-rm-media="${m.id}" title="移除">×</button>
+      </span>`;
+    }).join("") || '<span class="muted">尚未绑定素材</span>';
+  }
+
+  async function saveMediaBindings(cueId) {
+    await api(`/api/cues/${cueId}/media`, {
+      method: "PUT",
+      body: JSON.stringify({ media_item_ids: state.editingMedia }),
+    });
   }
 
   function addDepRow(selectedId, delay) {
@@ -388,15 +445,19 @@
       return;
     }
     try {
-      if (state.editingId) {
-        await api(`/api/cues/${state.editingId}`, {
+      let cueId = state.editingId;
+      if (cueId) {
+        await api(`/api/cues/${cueId}`, {
           method: "PUT", body: JSON.stringify(payload),
         });
       } else {
-        await api("/api/cues", {
+        const created = await api("/api/cues", {
           method: "POST", body: JSON.stringify(payload),
         });
+        cueId = created.id;
       }
+      // 素材绑定独立全量替换（提示本体的成环回滚不影响已存绑定，反之亦然）
+      await saveMediaBindings(cueId);
       closeEditor();
       await reload();
     } catch (err) {
@@ -428,6 +489,14 @@
     $("#cancelBtn").addEventListener("click", closeEditor);
     $("#cueForm").addEventListener("submit", submitForm);
     $("#addDepBtn").addEventListener("click", () => addDepRow(null, 0));
+    $("#addMediaBtn").addEventListener("click", () => {
+      const id = Number($("#mediaSelect").value);
+      if (!id) return;
+      if (!state.editingMedia.includes(id)) {
+        state.editingMedia.push(id);
+        renderMediaPicker();
+      }
+    });
     $("#modalOverlay").addEventListener("click", (e) => {
       if (e.target === $("#modalOverlay")) closeEditor();
     });
@@ -441,7 +510,15 @@
       const editId = e.target.closest("[data-edit]")?.dataset.edit;
       const delId = e.target.closest("[data-del]")?.dataset.del;
       const rmDep = e.target.closest("[data-rm-dep]");
+      const rmMedia = e.target.closest("[data-rm-media]");
       const jumpId = e.target.closest("[data-jump]")?.dataset.jump;
+      if (rmMedia) {
+        e.stopPropagation();
+        const mid = Number(rmMedia.dataset.rmMedia);
+        state.editingMedia = state.editingMedia.filter((x) => x !== mid);
+        renderMediaPicker();
+        return;
+      }
       if (editId) openEditor(Number(editId));
       else if (delId) await deleteCue(Number(delId));
       else if (rmDep) rmDep.closest(".dep-row").remove();

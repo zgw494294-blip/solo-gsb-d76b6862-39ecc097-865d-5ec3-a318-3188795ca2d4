@@ -5,9 +5,15 @@
 另设**排演执行台**：开始一场排演即冻结快照，按场钟与前置完成情况实时判定就绪状态，
 记录每条提示的计划 / 实际时间与偏差。
 
+**提示素材库**：提示可绑定本地**音频 / 视频 / 图片**素材。上传采用流式写入临时文件并
+计算 SHA-256，校验扩展名 / MIME / 文件头魔数 / 大小后**原子移入**持久化目录；相同哈希
+只保存一份物理实体，但可建立多个素材条目；被提示引用的条目不可删除，删除同哈希最后
+一个条目时才回收实体文件。另支持按名称检索与一键完整性检查（实体缺失 / 哈希不符时，
+所有引用提示显示「素材未就绪」，重传同内容文件自动修复）。
+
 - 后端：**FastAPI + SQLite**（零外部服务，单文件数据库）
 - 前端：**原生 HTML / CSS / JavaScript**（无构建步骤、无 npm 依赖）
-- 部署：**Docker 一键启动**，数据存于 Docker 卷，刷新 / 重启不丢失
+- 部署：**Docker 一键启动**，数据库与素材实体同存于 Docker 卷，刷新 / 重启不丢失
 
 ## 一条命令启动
 
@@ -19,6 +25,8 @@ docker compose up -d --build
 
 - 提示单（编辑 / 时间轴）：**http://localhost:8000**
 - 排演执行台：**http://localhost:8000/console**
+- 提示素材库（上传 / 检索 / 绑定 / 完整性检查）：**http://localhost:8000/media**
+- 交互式 API 文档：**http://localhost:8000/docs**
 
 首次启动会自动建表并写入一组演示数据（含一条锁定冲突链演示）。
 停止 / 查看日志：
@@ -40,11 +48,13 @@ docker compose logs -f     # 查看日志
 | `HOST_PORT` | `8000` | 宿主机映射端口。端口被占用时改为其他值，如 `HOST_PORT=8080` |
 | `SEED_DEMO` | `1` | 首次启动且数据库为空时是否写入演示数据，`1`=开启 / `0`=关闭 |
 | `CUE_DB_PATH` | `/data/cues.db` | 容器内 SQLite 文件路径（位于数据卷中，一般无需修改） |
+| `CUE_MEDIA_DIR` | `/data/media` | 素材根目录：实体存于内容寻址子目录，上传临时分片存于 `tmp/`（同在数据卷） |
+| `CUE_MEDIA_MAX_BYTES` | `209715200` | 单个素材上传大小上限（字节，默认 200MB） |
 
-示例（改用 8080 端口、空库启动）：
+示例（改用 8080 端口、空库启动、上限 50MB）：
 
 ```bash
-HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
+HOST_PORT=8080 SEED_DEMO=0 CUE_MEDIA_MAX_BYTES=52428800 docker compose up -d --build
 # 访问 http://localhost:8080
 ```
 
@@ -82,6 +92,31 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 - **刷新恢复**：进行中场刷新后继续走时并保留全部已记录状态；场次结束后刷新仍展示
   最近一场及其完整记录，可再开始新一场。
 
+### 提示素材库（`/media`）
+
+- **流式上传**：文件分块写入持久化目录内的临时分片（`tmp/upload-*.part`），边写边
+  计算 SHA-256；超过 `CUE_MEDIA_MAX_BYTES` 立即中断。落盘前依次校验**扩展名白名单、
+  声明 MIME、文件头魔数**（防止伪造后缀），全部通过后用 `os.replace` **原子移入**
+  内容寻址路径 `<媒体根>/ab/abcd/<sha256>.<ext>`。
+- **哈希去重**：同 SHA-256 文件只保存一份实体；每次上传都会建立独立的素材**条目**
+  （可自定义名称），同一份实体可绑定任意多条提示。
+- **引用保护与实体回收**：被任意提示引用的条目删除时返回 `409`；只有删除某哈希的
+  **最后一个条目**时才在同一数据库事务内删除实体行，提交成功后才回收物理文件，
+  共享实体绝不会被误删。删除提示会自动解除其绑定（实体保留）。
+- **失败不留痕**：上传校验失败、大小超限、数据库回滚或请求中断都会删除临时分片；
+  数据库事务保证不会出现空条目；容器重启时自动清理 `tmp/` 残骸。
+- **并发安全**：进程内按 SHA 互斥 + SQLite `BEGIN IMMEDIATE` 写串行化；并发重复上传
+  同内容只产生一份实体文件、一个实体行。
+- **名称检索**：素材库页与 `GET /api/media?q=` 支持按条目名 / 原始文件名模糊检索。
+- **提示绑定**：可在素材库页点「绑定提示」，也可在提示单的新增 / 编辑弹窗内多选素材；
+  绑定为全量替换（`PUT /api/cues/{id}/media`）。
+- **完整性检查**：素材库页「🛡 完整性检查」或 `GET /api/media/verify` 对全部实体重算
+  SHA-256；实体缺失或哈希不符时标记状态并列出受影响提示。这些提示在**提示单**与
+  **排演执行台**（含进行中的历史场次）立即显示「素材未就绪」；重新上传同内容文件即
+  自动修复原条目，刷新或容器重启后状态不丢失（启动时按物理文件重新对账）。
+- **在线预览**：图片直接预览，音频 / 视频用浏览器原生播放器（内容接口支持 Range，
+  视频可拖动进度）。
+
 ## HTTP API
 
 服务启动后可访问交互式文档：**http://localhost:8000/docs**
@@ -89,18 +124,35 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
-| `GET` | `/api/schedule` | 完整排程结果：提示（含 start/end/冲突标记/冲突链）、依赖边、冲突列表、环信息 |
-| `GET` | `/api/cues/{id}` | 单条提示详情（含前置与延迟） |
+| `GET` | `/api/schedule` | 完整排程结果：提示（含 start/end/冲突标记/冲突链/**media/media_ready**）、依赖边、冲突列表、环信息 |
+| `GET` | `/api/cues/{id}` | 单条提示详情（含前置、延迟与绑定素材） |
 | `POST` | `/api/cues` | 新增提示（含前置依赖），成环返回 `409` |
 | `PUT` | `/api/cues/{id}` | 全量更新提示（含前置依赖），成环返回 `409` |
-| `DELETE` | `/api/cues/{id}` | 删除提示并级联清理依赖 |
+| `DELETE` | `/api/cues/{id}` | 删除提示并级联清理依赖与素材绑定 |
+| `PUT` | `/api/cues/{id}/media` | 全量替换提示绑定的素材条目 `{"media_item_ids":[...]}` |
+| `POST` | `/api/media` | **流式上传素材**（multipart：`file` 必填、`name` 可选）；400/413/415 见下 |
+| `GET` | `/api/media?q=` | 素材条目列表（按名称 / 原始文件名检索），含去重实体数、引用数、就绪状态 |
+| `GET` | `/api/media/verify?deep=true` | 全量完整性检查（重算 SHA-256），返回异常实体与受影响提示 |
+| `GET` | `/api/media/{id}` | 素材条目详情（含绑定的提示列表） |
+| `GET` | `/api/media/{id}/content` | 实体文件流（支持 Range，在线播放 / 预览）；实体缺失返回 404 |
+| `DELETE` | `/api/media/{id}` | 删除素材条目；被引用返回 `409`；最后一个同哈希条目回收实体文件 |
 | `POST` | `/api/runs` | 开始一场排演（冻结快照）；已有进行中场 / 提示单为空返回 `409` |
 | `GET` | `/api/runs/active` | 当前进行中的排演（无则 `{"run": null}`） |
 | `GET` | `/api/runs/latest` | 最近一场排演（含已结束），刷新后恢复展示 |
-| `GET` | `/api/runs/{id}` | 指定场次的实时视图（状态 / 场钟 / 偏差） |
+| `GET` | `/api/runs/{id}` | 指定场次的实时视图（状态 / 场钟 / 偏差 / **素材就绪状态**） |
 | `POST` | `/api/runs/{id}/cues/{cueId}/start` | 记录提示开始（仅就绪可操作，否则 `409`） |
 | `POST` | `/api/runs/{id}/cues/{cueId}/complete` | 记录提示完成（仅执行中可操作，否则 `409`） |
 | `POST` | `/api/runs/{id}/end` | 结束本场（记录相对起点的结束秒数） |
+
+上传状态码：`400` 文件名 / 扩展 / 名称非法或空文件；`413` 超过大小上限；
+`415` 扩展名或 MIME 不受支持、MIME 与扩展名不符、文件头魔数与扩展名不符。
+
+上传示例（curl）：
+
+```bash
+curl -F "file=@/path/to/序曲.mp3" -F "name=第一幕序曲" \
+     http://localhost:8000/api/media
+```
 
 请求体示例：
 
@@ -144,8 +196,17 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 
 ```bash
 pip install -r requirements.txt
-CUE_DB_PATH=./cues.db SEED_DEMO=1 uvicorn app.main:app --reload --port 8000
+CUE_DB_PATH=./cues.db CUE_MEDIA_DIR=./data/media SEED_DEMO=1 \
+  uvicorn app.main:app --reload --port 8000
 # http://localhost:8000
+```
+
+测试（无需安装 FastAPI，测试用最小 stub + 真实 SQLite / 文件系统）：
+
+```bash
+python3 test_rehearsal.py   # 排演核心状态机
+python3 test_http.py        # HTTP 路由层（含素材上传 / 去重 / 回收 / 完整性）
+python3 test_media.py       # 素材库端到端（含并发重复上传竞争）
 ```
 
 ## 项目结构
@@ -153,18 +214,24 @@ CUE_DB_PATH=./cues.db SEED_DEMO=1 uvicorn app.main:app --reload --port 8000
 ```
 .
 ├── app/
-│   ├── main.py        # FastAPI 路由、启动初始化（建表/演示数据）
+│   ├── main.py        # FastAPI 路由、启动初始化（建表/演示数据/素材对账）
 │   ├── scheduler.py   # 拓扑排序、级联重算、环检测、冲突链提取（纯标准库）
 │   ├── rehearsal.py   # 排演快照冻结、就绪推导、开始/完成/结束状态机
-│   ├── database.py    # SQLite 连接、表结构（含排演/快照表）、演示数据
+│   ├── media.py       # 素材库：流式落盘、SHA-256 去重、原子移入、
+│   │                  #   引用保护 / 末条目回收、完整性检查、启动对账
+│   ├── database.py    # SQLite 连接、表结构（cues/deps/runs/素材三表）、演示数据
 │   └── schemas.py     # Pydantic 校验模型
 ├── static/
-│   ├── index.html     # 提示单单页界面
+│   ├── index.html     # 提示单单页界面（编辑弹窗内可绑定素材）
 │   ├── console.html   # 排演执行台页面（/console）
-│   ├── console.js     # 执行台：场钟、状态推导、轮询、开始/完成/结束
-│   ├── console.css
-│   ├── style.css
-│   └── app.js         # 时间轴渲染 / 缩放 / 筛选 / 编辑
+│   ├── media.html     # 提示素材库页面（/media）
+│   ├── console.js     # 执行台：场钟、状态推导、轮询、开始/完成/结束、素材预览
+│   ├── media.js       # 素材库：拖拽上传（进度）、检索、绑定、完整性检查
+│   ├── console.css / media.css / style.css
+│   └── app.js         # 时间轴渲染 / 缩放 / 筛选 / 编辑 / 素材绑定
+├── test_rehearsal.py  # 排演核心测试
+├── test_http.py       # HTTP 路由层测试（stub FastAPI）
+├── test_media.py      # 素材库端到端与并发竞争测试
 ├── Dockerfile
 ├── compose.yaml
 ├── .env.example

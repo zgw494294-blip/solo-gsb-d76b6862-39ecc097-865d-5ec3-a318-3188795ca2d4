@@ -5,7 +5,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
-    CUE_DB_PATH=/data/cues.db
+    CUE_DB_PATH=/data/cues.db \
+    CUE_MEDIA_DIR=/data/media
 
 WORKDIR /app
 
@@ -17,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 
-# SQLite 数据持久化目录
-RUN mkdir -p /data
+# SQLite 数据与素材实体持久化目录（同卷：数据库 + media/ 素材文件 + media/tmp 临时分片）
+RUN mkdir -p /data/media/tmp
 VOLUME ["/data"]
 
 EXPOSE 8000

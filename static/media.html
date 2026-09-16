@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>提示素材库 · 舞台排演提示单</title>
+<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/media.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">🎞️</span>
+    <div>
+      <h1>提示素材库</h1>
+      <p class="subtitle">Media Library · 音频 / 视频 / 图片，SHA-256 去重，与提示绑定</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <a class="nav-link" href="/">← 返回提示单</a>
+    <a class="nav-link" href="/console">🎬 排演执行台</a>
+  </div>
+</header>
+
+<main>
+  <section class="panel upload-panel">
+    <div class="upload-row">
+      <div class="upload-drop" id="dropZone" tabindex="0">
+        <input type="file" id="fileInput" accept="image/*,audio/*,video/*" hidden multiple />
+        <div class="drop-inner">
+          <span class="drop-ico">⬆</span>
+          <div>
+            <strong id="dropTitle">点击选择 或 拖拽文件到此处上传</strong>
+            <p class="muted" id="dropHint">支持 jpg / png / gif / webp · mp3 / wav / ogg / m4a / flac · mp4 / mov / webm，单文件最大 200MB</p>
+          </div>
+        </div>
+      </div>
+      <div id="uploadQueue" class="upload-queue"></div>
+    </div>
+  </section>
+
+  <div id="verifyBanner" class="verify-banner hidden"></div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>素材条目</h2>
+      <div class="lib-tools">
+        <input type="search" id="searchInput" placeholder="按名称检索…" />
+        <button type="button" id="verifyBtn" class="ghost">🛡 完整性检查</button>
+        <span id="listCount" class="muted"></span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="mediaTable">
+        <thead>
+          <tr>
+            <th class="thumb-col">预览</th><th>名称</th><th>类型</th>
+            <th>大小</th><th>SHA-256</th><th>引用</th><th>状态</th>
+            <th class="op-col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="mediaTbody"></tbody>
+      </table>
+      <div id="mediaEmpty" class="empty-hint hidden">暂无素材，上传第一个文件试试</div>
+    </div>
+  </section>
+</main>
+
+<!-- 绑定提示弹窗 -->
+<div id="bindOverlay" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="bindTitle">绑定到提示</h3>
+    <p class="hint" id="bindHint"></p>
+    <div id="cuePickList" class="cue-pick-list"></div>
+    <div id="bindError" class="form-error hidden"></div>
+    <div class="modal-actions">
+      <button type="button" id="bindCancel" class="ghost">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预览弹窗 -->
+<div id="previewOverlay" class="modal-overlay hidden">
+  <div class="modal preview-modal" role="dialog" aria-modal="true">
+    <h3 id="previewTitle"></h3>
+    <div id="previewBody" class="preview-body"></div>
+    <div class="modal-actions">
+      <a id="previewDownload" class="nav-link" download>下载原文件</a>
+      <button type="button" id="previewClose" class="primary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/media.js"></script>
+</body>
+</html>

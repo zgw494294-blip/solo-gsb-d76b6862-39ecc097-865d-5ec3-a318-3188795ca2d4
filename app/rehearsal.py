@@ -22,6 +22,7 @@ import time
 from fastapi import HTTPException
 
 from . import database
+from . import media as media_mod
 from .scheduler import build_schedule
 
 # 状态
@@ -155,6 +156,11 @@ def _assemble(conn, row) -> dict:
     derived = _derive_states(snap_cues, snap_deps, elapsed)
     stored_map = {c["id"]: c for c in snap_cues}
 
+    # 素材就绪状态为**实时**读取（不进快照）：实体缺失 / 哈希不符时，
+    # 即使是开场前已绑定素材的历史场次，引用提示也立刻显示「素材未就绪」。
+    media_map = media_mod.attach_media_to_cues(
+        conn, [pc["id"] for pc in sched["cues"]])
+
     cues_out = []
     for pc in sched["cues"]:
         cid = pc["id"]
@@ -183,6 +189,8 @@ def _assemble(conn, row) -> dict:
             "actual_end": actual_end,
             "start_deviation": start_dev,
             "end_deviation": end_dev,
+            "media": media_map.get(cid, []),
+            "media_ready": all(m["ready"] for m in media_map.get(cid, [])),
         })
 
     done = sum(1 for c in snap_cues if c["status"] == COMPLETED)

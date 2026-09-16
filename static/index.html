@@ -29,6 +29,7 @@
       <span class="zoom-label"><span id="zoomVal">6</span> px/秒</span>
     </div>
     <button id="addBtn" class="primary" type="button">＋ 新增提示</button>
+    <a class="nav-link" href="/media">🎞️ 素材库</a>
     <a class="nav-link" href="/console">🎬 排演执行台</a>
   </div>
 </header>
@@ -66,7 +67,7 @@
           <tr>
             <th>#</th><th>部门</th><th>名称</th>
             <th>开始</th><th>结束</th><th>时长</th>
-            <th>前置（延迟）</th><th>状态</th><th class="op-col">操作</th>
+            <th>前置（延迟）</th><th>素材</th><th>状态</th><th class="op-col">操作</th>
           </tr>
         </thead>
         <tbody id="cueTbody"></tbody>
@@ -108,6 +109,19 @@
       <div id="depRows"></div>
       <p class="hint">未锁定时，开始时间 = 所有前置「结束 + 延迟」的最大值。
         保存时若新增依赖形成环将被拒绝。</p>
+
+      <div class="dep-head media-head">
+        <span>绑定素材（音频 / 视频 / 图片）</span>
+        <span class="muted">从素材库选择，可多选</span>
+      </div>
+      <div id="mediaPick" class="media-pick">
+        <div class="media-pick-bar">
+          <select id="mediaSelect"></select>
+          <button type="button" id="addMediaBtn" class="ghost">＋ 绑定</button>
+          <a class="nav-link media-open-lib" href="/media" target="_blank">打开素材库 ↗</a>
+        </div>
+        <div id="mediaChips" class="media-chips"></div>
+      </div>
 
       <div id="formError" class="form-error hidden"></div>
       <div class="modal-actions">

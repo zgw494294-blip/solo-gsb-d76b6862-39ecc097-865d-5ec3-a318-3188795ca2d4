@@ -350,6 +350,36 @@ input:focus { outline: none; border-color: var(--accent); }
 
 .hidden { display: none !important; }
 
+/* --------------------------------------------------------------- 素材 */
+.media-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 5px; padding: 1px 8px; font-size: 11.5px;
+  border: 1px solid rgba(76,175,125,.35);
+  background: rgba(76,175,125,.1); color: #9fe0bd;
+  white-space: nowrap;
+}
+.media-chip.notready {
+  border-color: rgba(255,90,90,.55);
+  background: rgba(255,90,90,.13); color: #ffb3b3;
+}
+.media-head { margin-top: 14px; }
+.media-pick { margin-bottom: 4px; }
+.media-pick-bar { display: flex; gap: 8px; align-items: center; }
+.media-pick-bar select {
+  flex: 1 1 auto;
+  background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 7px 9px; font-size: 13px;
+}
+.media-open-lib { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+.media-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.media-chips .chip-x {
+  border: none; background: transparent; color: inherit;
+  cursor: pointer; padding: 0 0 0 3px; font-size: 13px; line-height: 1;
+}
+.media-chips .chip-x:hover { color: #fff; }
+.media-mini { display: inline-flex; gap: 3px; }
+.media-mini a { text-decoration: none; }
+
 /* --------------------------------------------------------------- 响应式 */
 @media (max-width: 760px) {
   :root { --label-w: 190px; }

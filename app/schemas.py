@@ -44,3 +44,15 @@ class CueUpdate(CueBase):
 
 class RunStart(BaseModel):
     note: str = Field("", max_length=200, description="本场备注（可选）")
+
+
+class CueMediaBinding(BaseModel):
+    """全量替换某条提示绑定的素材条目。"""
+    media_item_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("media_item_ids")
+    @classmethod
+    def _unique(cls, v: list[int]) -> list[int]:
+        if len(v) != len(set(v)):
+            raise ValueError("同一素材不能重复绑定")
+        return v
