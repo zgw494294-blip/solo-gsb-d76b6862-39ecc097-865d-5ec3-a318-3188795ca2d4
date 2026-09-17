@@ -220,6 +220,8 @@
     return `<span class="state-chip waiting"><i class="st st-waiting"></i>等待${cd}</span>`;
   }
 
+  const assetKIcon = { image: "🖼️", audio: "🎵", video: "🎬" };
+
   function renderTable() {
     const run = state.run;
     const active = run.status === "running";
@@ -234,6 +236,19 @@
       const conflict = c.conflict
         ? ` <span title="锁定早于依赖允许 ${fmtTime(c.allowed)}">⚠</span>` : "";
 
+      // 素材就绪状态：任一条素材未就绪 -> 整条提示未就绪，禁止开始
+      const assetList = c.assets || [];
+      const assetBad = assetList.some((a) => a.state !== "ready");
+      const assetCell = assetList.length
+        ? `<span class="asset-group">${assetList.map((a) => {
+            const cls = a.state === "ready" ? "asset-chip ready" : "asset-chip bad";
+            const tip = a.state === "ready"
+              ? `${a.name}（就绪）` : `${a.name}（未就绪：实体缺失或哈希不符）`;
+            return `<span class="${cls}" title="${escapeHtml(tip)}">` +
+              `${assetKIcon[a.kind] || "📎"}${a.state === "ready" ? "" : "⚠"}</span>`;
+          }).join("")}</span>`
+        : '<span class="muted">—</span>';
+
       // 开始偏差取服务端记录；执行中的结束偏差用本地场钟实时估算
       let endDev = c.end_deviation;
       let liveTag = "";
@@ -245,8 +260,10 @@
       let op;
       if (!active) {
         op = st === "completed" ? '<span class="muted">✓</span>' : '<span class="muted">—</span>';
-      } else if (st === "ready") {
+      } else if (st === "ready" && !assetBad) {
         op = `<button class="primary" type="button" data-start="${c.id}">▶ 开始</button>`;
+      } else if (assetBad && (st === "ready" || st === "waiting")) {
+        op = `<button type="button" disabled title="绑定素材未就绪，禁止开始">⛔ 素材未就绪</button>`;
       } else if (st === "running") {
         op = `<button type="button" data-complete="${c.id}">■ 完成</button>`;
       } else if (st === "completed") {
@@ -263,10 +280,12 @@
       const actualEnd = c.actual_end !== null && c.actual_end !== undefined
         ? fmtTime(c.actual_end) : "—";
 
-      return `<tr class="row-${st}" data-id="${c.id}">
+      const rowCls = assetBad ? `row-${st} row-asset-bad` : `row-${st}`;
+      return `<tr class="${rowCls}" data-id="${c.id}">
         <td class="num">${c.id}</td>
         <td><span class="tag">${escapeHtml(c.department)}</span></td>
         <td>${escapeHtml(c.name)}${lock}${conflict}</td>
+        <td>${assetCell}</td>
         <td class="num">${fmtTime(c.start)}</td>
         <td class="num">${actualStart}</td>
         <td>${fmtSigned(c.start_deviation)}</td>

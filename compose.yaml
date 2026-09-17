@@ -11,6 +11,10 @@ services:
       PORT: "8000"
       # SQLite 数据库文件路径（位于挂载卷内，刷新 / 重启不丢数据）
       CUE_DB_PATH: "/data/cues.db"
+      # 素材实体与上传临时文件目录（与数据库同在挂载卷内）
+      ASSET_STORAGE_DIR: "/data/assets"
+      # 单个素材大小上限（字节），默认 200MB
+      ASSET_MAX_SIZE: "${ASSET_MAX_SIZE:-209715200}"
       # 首次启动且库为空时写入演示数据：1=开启，0=关闭
       SEED_DEMO: "${SEED_DEMO:-1}"
     volumes:

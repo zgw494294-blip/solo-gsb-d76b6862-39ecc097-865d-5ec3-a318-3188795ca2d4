@@ -5,9 +5,16 @@
 另设**排演执行台**：开始一场排演即冻结快照，按场钟与前置完成情况实时判定就绪状态，
 记录每条提示的计划 / 实际时间与偏差。
 
+**提示素材库**：可为每条提示绑定本地**图片 / 音频 / 视频**素材。上传采用流式写入临时
+文件并实时计算 SHA-256，校验扩展名、真实 MIME（魔数）与大小后原子移入持久化目录；
+相同哈希只保存**一份实体**，但可建立**多个素材条目**。被提示引用的条目不可删除，删除
+某哈希的最后一个条目时才回收实体。支持按名称检索、提示绑定与一键**完整性检查**：实体
+缺失或哈希不符时，所有引用该素材的提示在提示单与执行台都显示「素材未就绪」。
+
 - 后端：**FastAPI + SQLite**（零外部服务，单文件数据库）
 - 前端：**原生 HTML / CSS / JavaScript**（无构建步骤、无 npm 依赖）
-- 部署：**Docker 一键启动**，数据存于 Docker 卷，刷新 / 重启不丢失
+- 素材：**手写流式 multipart 解析 + 内容寻址存储**（无 python-multipart 依赖）
+- 部署：**Docker 一键启动**，数据库与素材文件均存于 Docker 卷，刷新 / 重启不丢失
 
 ## 一条命令启动
 
@@ -18,9 +25,12 @@ docker compose up -d --build
 启动后浏览器访问：
 
 - 提示单（编辑 / 时间轴）：**http://localhost:8000**
+- 提示素材库（上传 / 检索 / 绑定 / 完整性检查）：**http://localhost:8000/assets**
 - 排演执行台：**http://localhost:8000/console**
+- 交互式 API 文档：**http://localhost:8000/docs**
 
-首次启动会自动建表并写入一组演示数据（含一条锁定冲突链演示）。
+首次启动会自动建表并写入一组演示数据（含一条锁定冲突链演示，以及一张图片、一段
+音频两个演示素材，分别绑定到前两条提示）。
 停止 / 查看日志：
 
 ```bash
@@ -28,7 +38,8 @@ docker compose down        # 停止（保留数据）
 docker compose logs -f     # 查看日志
 ```
 
-> 需要完全重置数据：`docker compose down -v`（删除数据卷）后重新 `up`。
+> 需要完全重置数据：`docker compose down -v`（删除数据卷，数据库与素材实体一并清空）
+> 后重新 `up`。
 
 ## 环境变量与配置
 
@@ -38,15 +49,20 @@ docker compose logs -f     # 查看日志
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `HOST_PORT` | `8000` | 宿主机映射端口。端口被占用时改为其他值，如 `HOST_PORT=8080` |
-| `SEED_DEMO` | `1` | 首次启动且数据库为空时是否写入演示数据，`1`=开启 / `0`=关闭 |
+| `SEED_DEMO` | `1` | 首次启动且数据库为空时是否写入演示数据（含演示素材），`1`=开启 / `0`=关闭 |
 | `CUE_DB_PATH` | `/data/cues.db` | 容器内 SQLite 文件路径（位于数据卷中，一般无需修改） |
+| `ASSET_STORAGE_DIR` | `/data/assets` | 容器内素材存储目录（`blobs/` 存实体、`tmp/` 存上传临时文件，位于数据卷中） |
+| `ASSET_MAX_SIZE` | `209715200` | 单个素材大小上限（字节），默认 200MB |
 
-示例（改用 8080 端口、空库启动）：
+示例（改用 8080 端口、空库启动、上传上限 50MB）：
 
 ```bash
-HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
+HOST_PORT=8080 SEED_DEMO=0 ASSET_MAX_SIZE=52428800 docker compose up -d --build
 # 访问 http://localhost:8080
 ```
+
+访问地址与端口：容器内固定监听 `0.0.0.0:8000`，通过 `HOST_PORT` 映射到宿主机；
+网页与 API 都走该端口（如 `http://localhost:8000/assets`）。
 
 ## 功能说明
 
@@ -64,6 +80,34 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 - **时间轴缩放**：缩放滑块 / `＋` `−` 按钮调整每秒像素数，「适配」自动缩放到全局，
   缩放比例本地持久化。
 - **数据持久化**：SQLite 文件存于 Docker 卷 `cue-data`，页面刷新、容器重启数据不丢。
+
+### 提示素材库（`/assets`）
+
+- **流式上传**：服务端逐块读取请求体，边写入临时文件（`tmp/`，每次上传独立子目录）
+  边计算 SHA-256，内存占用恒定；超过 `ASSET_MAX_SIZE` 立即中断，不把整个文件读进内存。
+- **三重校验**：扩展名白名单 + 文件头魔数嗅探的真实类型（防止把可执行文件改名为
+  `.png` 等）+ 大小上限，任一不符返回 `415` / `413` / `400`。
+- **原子去重落盘**：全部通过后在 `BEGIN IMMEDIATE` 事务内用硬链接把临时文件发布为
+  内容寻址实体 `blobs/<sha前2位>/<sha>.<ext>`，再随事务一起提交；事务可见时实体必已
+  就位。相同内容只保存**一份实体**（`asset_blobs`），但每次上传建立**独立素材条目**
+  （`assets`，可各自命名）。
+- **引用保护**：`cue_assets.asset_id` 外键 `ON DELETE RESTRICT`，被提示引用的素材条目
+  删除返回 `409`；只有删除某哈希的**最后一个**条目时才删除 `asset_blobs` 行并在事务
+  提交后回收实体文件，因此数据库回滚或并发重复上传都不会误删共享实体。
+- **失败不留痕**：校验失败、multipart 解析失败、数据库回滚都会删除本次临时文件，绝不
+  留下空记录或临时垃圾；启动时自动清理上次崩溃残留的临时文件。
+- **并发安全**：SQLite 采用 WAL + 30s busy timeout，写事务经 `BEGIN IMMEDIATE` 串行化；
+  并发上传相同内容时实体只落一份、条目各自建立。
+- **绑定与检索**：素材库页可勾选多条提示批量绑定，提示编辑弹窗也可直接添加素材；列表
+  支持按名称实时检索，显示大小、哈希、引用提示与就绪状态。
+- **完整性检查**：`🔍 完整性检查` 对所有实体重新计算 SHA-256，标记「缺失 / 哈希不符」，
+  并扫描磁盘孤儿文件（可一键清理）。实体缺失或哈希不符时，**所有引用它的提示**在提示单
+  与排演执行台都显示「素材未就绪」，执行台禁止开始该提示（服务端返回 `409`）；素材恢复
+  并重新检查通过后自动恢复就绪。
+- **预览 / 播放**：图片直接预览，音视频用原生 `<audio>/<video>` 播放；内容接口支持
+  HTTP `Range`（206），视频可拖动进度。开场冻结快照时一并冻结素材绑定，历史场次按当时
+  绑定的实体实况显示就绪状态。
+- **数据持久化**：素材实体与数据库都在 Docker 卷 `cue-data` 内，刷新 / 重启不丢。
 
 ### 排演执行台（`/console`）
 
@@ -89,7 +133,15 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
-| `GET` | `/api/schedule` | 完整排程结果：提示（含 start/end/冲突标记/冲突链）、依赖边、冲突列表、环信息 |
+| `GET` | `/api/assets` | 素材列表；`?q=关键词` 按名称/原始文件名检索 |
+| `POST` | `/api/assets` | 流式上传素材（`multipart/form-data`：`file` + 可选 `name`），超限 413 / 类型不符 415 |
+| `GET` | `/api/assets/{id}` | 单个素材详情（含实时就绪状态、引用提示） |
+| `GET` | `/api/assets/{id}/content` | 实体文件（支持 `Range`，未就绪返回 409） |
+| `DELETE` | `/api/assets/{id}` | 删除素材条目；被提示引用返回 409；删最后一个同哈希条目才回收实体 |
+| `PUT` | `/api/cues/{id}/assets` | 全量设置提示绑定的素材：`{"asset_ids":[...]}`（有序、去重） |
+| `POST` | `/api/assets/verify` | 完整性检查：重算全部实体 SHA-256，返回缺失 / 不符 / 孤儿文件与受影响提示 |
+| `POST` | `/api/assets/cleanup-orphans` | 清理磁盘上无数据库记录的孤儿实体文件 |
+| `GET` | `/api/schedule` | 完整排程结果：提示（含 start/end/冲突标记/冲突链、`assets`/`assets_ready`）、依赖边、冲突列表、环信息 |
 | `GET` | `/api/cues/{id}` | 单条提示详情（含前置与延迟） |
 | `POST` | `/api/cues` | 新增提示（含前置依赖），成环返回 `409` |
 | `PUT` | `/api/cues/{id}` | 全量更新提示（含前置依赖），成环返回 `409` |
@@ -132,11 +184,12 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 
 | 字段 | 说明 |
 | --- | --- |
-| `status` | 实时状态：`waiting` / `ready` / `running` / `completed` |
+| `status` | 实时状态：`waiting` / `ready` / `running` / `completed`（素材未就绪时强制 waiting） |
 | `ready_threshold` | 就绪触发时刻（前置实际完成+延迟 与锁定开场的最大值，秒） |
-| `ready_in` | 等待中且前置均完成时，距就绪还差的秒数；否则为 `null` |
+| `ready_in` | 等待中且前置均完成时，距就绪还差的秒数；否则为 `null`（素材未就绪时也为 `null`） |
 | `actual_start` / `actual_end` | 实际开始 / 完成相对本场起点的秒数 |
 | `start_deviation` / `end_deviation` | 实际 − 计划的偏差秒数（正=晚，负=早） |
+| `assets` / `assets_ready` | 开场冻结的素材条目（含实时就绪状态）及是否全部就绪 |
 
 ## 本地开发（不使用 Docker）
 
@@ -144,8 +197,9 @@ HOST_PORT=8080 SEED_DEMO=0 docker compose up -d --build
 
 ```bash
 pip install -r requirements.txt
-CUE_DB_PATH=./cues.db SEED_DEMO=1 uvicorn app.main:app --reload --port 8000
-# http://localhost:8000
+CUE_DB_PATH=./cues.db ASSET_STORAGE_DIR=./assets SEED_DEMO=1 \
+  uvicorn app.main:app --reload --port 8000
+# http://localhost:8000 ，素材库 http://localhost:8000/assets
 ```
 
 ## 项目结构
@@ -153,20 +207,31 @@ CUE_DB_PATH=./cues.db SEED_DEMO=1 uvicorn app.main:app --reload --port 8000
 ```
 .
 ├── app/
-│   ├── main.py        # FastAPI 路由、启动初始化（建表/演示数据）
+│   ├── main.py        # FastAPI 路由、启动初始化（建表/建目录/演示数据）
 │   ├── scheduler.py   # 拓扑排序、级联重算、环检测、冲突链提取（纯标准库）
-│   ├── rehearsal.py   # 排演快照冻结、就绪推导、开始/完成/结束状态机
-│   ├── database.py    # SQLite 连接、表结构（含排演/快照表）、演示数据
+│   ├── rehearsal.py   # 排演快照冻结、就绪推导（含素材门禁）、开始/完成/结束状态机
+│   ├── assets.py      # 素材：流式 multipart、SHA-256、MIME 嗅探、原子去重落盘、
+│   │                  #       引用保护删除、绑定、完整性检查、素材快照
+│   ├── database.py    # SQLite 连接（WAL）、表结构（素材/绑定/快照表）、演示数据
 │   └── schemas.py     # Pydantic 校验模型
 ├── static/
 │   ├── index.html     # 提示单单页界面
 │   ├── console.html   # 排演执行台页面（/console）
+│   ├── assets.html    # 提示素材库页面（/assets）
 │   ├── console.js     # 执行台：场钟、状态推导、轮询、开始/完成/结束
+│   ├── assets.js      # 素材库：拖拽/进度上传、检索、绑定、预览、完整性检查
+│   ├── app.js         # 时间轴渲染 / 缩放 / 筛选 / 编辑（含素材绑定）
 │   ├── console.css
-│   ├── style.css
-│   └── app.js         # 时间轴渲染 / 缩放 / 筛选 / 编辑
+│   ├── assets.css
+│   └── style.css
+├── test_assets.py     # 素材核心测试（流式解析/去重/引用保护/完整性/并发，纯标准库）
+├── test_http.py       # HTTP 路由层测试（stub，无需 FastAPI）
+├── test_rehearsal.py  # 排演核心端到端测试（stub，无需 FastAPI）
 ├── Dockerfile
 ├── compose.yaml
 ├── .env.example
 └── requirements.txt
 ```
+
+> 注：素材上传未使用 `python-multipart`，`app/assets.py` 内实现了一个零依赖的流式
+> multipart 解析器，因此 `requirements.txt` 保持极简。

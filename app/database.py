@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Iterator
 
 DB_PATH = os.environ.get("CUE_DB_PATH", "/data/cues.db")
+# 实体文件与上传临时文件的持久化根目录（默认与数据库同在数据卷内，重启不丢）。
+STORAGE_DIR = os.environ.get(
+    "ASSET_STORAGE_DIR", str(Path(DB_PATH).resolve().parent / "assets"))
+BLOB_DIR = os.path.join(STORAGE_DIR, "blobs")
+TMP_DIR = os.path.join(STORAGE_DIR, "tmp")
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -79,6 +84,64 @@ CREATE TABLE IF NOT EXISTS run_deps (
 CREATE INDEX IF NOT EXISTS idx_run_cues_run ON run_cues(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_deps_run ON run_deps(run_id);
 
+-- ------------------------------------------------------------ 提示素材库
+-- 内容实体（去重单元）：同一 SHA-256 在磁盘上只保存一份文件。
+-- ext 为首个上传条目确定的规范扩展名，文件按 assets/<sha前2位>/<sha>.<ext> 存放。
+-- verify_status: ok=完整性校验通过 / bad=哈希不符 / missing=实体缺失（校验时写回）
+CREATE TABLE IF NOT EXISTS asset_blobs (
+    sha256         TEXT PRIMARY KEY,
+    ext            TEXT NOT NULL,
+    size           INTEGER NOT NULL CHECK(size > 0),
+    media_type     TEXT NOT NULL,
+    verify_status  TEXT NOT NULL DEFAULT 'ok'
+                     CHECK(verify_status IN ('ok','bad','missing')),
+    verified_at    TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 素材条目：同一实体（sha256）可建立多个条目（不同名称/来源）。
+CREATE TABLE IF NOT EXISTS assets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '',
+    ext           TEXT NOT NULL,
+    media_type    TEXT NOT NULL,
+    size          INTEGER NOT NULL CHECK(size > 0),
+    sha256        TEXT NOT NULL REFERENCES asset_blobs(sha256) ON DELETE RESTRICT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_sha ON assets(sha256);
+CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name);
+
+-- 提示 ↔ 素材 绑定（有序、不重复）。
+-- 被提示引用的素材条目受 RESTRICT 保护不可删除；提示删除时级联清理绑定。
+CREATE TABLE IF NOT EXISTS cue_assets (
+    cue_id   INTEGER NOT NULL REFERENCES cues(id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (cue_id, asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cue_assets_asset ON cue_assets(asset_id);
+
+-- 开场瞬间冻结的素材绑定快照（仅随场次级联删除，不再对 assets 建外键，
+-- 这样条目回收后历史场次仍保留快照，并按实体实况显示「未就绪」）。
+CREATE TABLE IF NOT EXISTS run_cue_assets (
+    run_id     INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    cue_id     INTEGER NOT NULL,
+    asset_id   INTEGER,                 -- 条目可能已删除，故可空
+    position   INTEGER NOT NULL DEFAULT 0,
+    name       TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    sha256     TEXT NOT NULL,
+    ext        TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    PRIMARY KEY (run_id, cue_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_cue_assets_run ON run_cue_assets(run_id);
+
 -- 数据库级保证：同一时刻最多一场进行中的排演（部分唯一索引）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_single_active
     ON runs(status) WHERE status = 'running';
@@ -87,9 +150,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_single_active
 
 def get_connection() -> sqlite3.Connection:
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL：多连接并发上传时读不阻塞写、写之间由 busy_timeout 排队等待，
+    # 避免高并发下 "database is locked" 导致条目丢失。
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.DatabaseError:
+        pass
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -102,10 +173,22 @@ def db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _column_names(conn, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 def init_db() -> None:
-    """创建表结构（容器启动时执行）。"""
+    """创建表结构并对旧库做增量迁移（容器启动时执行）。"""
     with db() as conn:
         conn.executescript(_SCHEMA)
+        # 兼容旧版本库：asset_blobs 缺少完整性字段时补齐
+        cols = _column_names(conn, "asset_blobs")
+        if cols and "verify_status" not in cols:
+            conn.execute(
+                "ALTER TABLE asset_blobs ADD COLUMN verify_status TEXT NOT NULL"
+                " DEFAULT 'ok'")
+        if cols and "verified_at" not in cols:
+            conn.execute("ALTER TABLE asset_blobs ADD COLUMN verified_at TEXT")
         conn.commit()
 
 
@@ -159,3 +242,6 @@ def seed_demo(force: bool = False) -> None:
                 (ids[cue_idx - 1], ids[pre_idx - 1], delay),
             )
         conn.commit()
+    # 演示素材（绑定到前两条提示）；独立事务写入实体文件
+    from .assets import seed_demo_assets  # noqa: WPS433 （避免循环导入）
+    seed_demo_assets(force=force, cue_ids=ids[:2])

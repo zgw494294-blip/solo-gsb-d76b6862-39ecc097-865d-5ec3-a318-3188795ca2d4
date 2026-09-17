@@ -9,6 +9,9 @@
     pps: Number(localStorage.getItem("cue_pps")) || 6, // 每秒像素
     deptFilter: localStorage.getItem("cue_dept") || "",
     editingId: null,
+    // 编辑器内待保存的素材 id（有序）
+    editingAssets: [],
+    assets: [],
     // 渲染后缓存：cueId -> { y, barX1, barX2 }
     geo: new Map(),
   };
@@ -63,8 +66,44 @@
   // ----------------------------------------------------------- 数据加载
 
   async function reload() {
-    state.schedule = await api("/api/schedule");
+    const [sched, assetData] = await Promise.all([
+      api("/api/schedule"),
+      api("/api/assets").catch(() => ({ items: [] })),
+    ]);
+    state.schedule = sched;
+    state.assets = assetData.items || [];
     renderAll();
+  }
+
+  // ----------------------------------------------------------- 素材绑定
+
+  const assetById = (id) => state.assets.find((a) => a.id === id);
+  const assetKIcon = { image: "🖼️", audio: "🎵", video: "🎬" };
+
+  function renderAssetBindings() {
+    const used = new Set(state.editingAssets);
+    const sel = $("#assetSelect");
+    sel.innerHTML = '<option value="">选择要绑定的素材…</option>' +
+      state.assets
+        .filter((a) => !used.has(a.id))
+        .map((a) => `<option value="${a.id}">
+          ${assetKIcon[a.kind] || "📎"} ${escapeHtml(a.name)}
+          ${a.state === "ready" ? "" : "（未就绪）"} [#${a.id}]</option>`)
+        .join("");
+    const list = $("#assetBindList");
+    if (!state.editingAssets.length) {
+      list.innerHTML = '<span class="muted">未绑定素材</span>';
+      return;
+    }
+    list.innerHTML = state.editingAssets.map((id) => {
+      const a = assetById(id);
+      if (!a) return "";
+      const bad = a.state !== "ready";
+      return `<span class="asset-chip ${bad ? "bad" : "ready"} removable">
+        ${assetKIcon[a.kind] || "📎"} ${escapeHtml(a.name)}
+        ${bad ? "⚠ 未就绪" : ""}
+        <button type="button" data-rm-asset="${id}" title="移除">×</button></span>`;
+    }).join("");
   }
 
   // ----------------------------------------------------------- 渲染总入口
@@ -252,6 +291,8 @@
 
   // ----------------------------------------------------------- 表格
 
+  const kindIcon = { image: "🖼️", audio: "🎵", video: "🎬" };
+
   function renderTable() {
     const cues = visibleCues();
     const rows = cues.map((c) => {
@@ -265,6 +306,16 @@
           title="前置：${escapeAttr(preName)}，延迟 ${p.delay} 秒">
           #${p.id} ${escapeHtml(preName)}${p.delay ? ` +${fmtDur(p.delay)}` : ""}</span>`;
       }).join("");
+
+      const assets = (c.assets || []).map((a) => {
+        const cls = a.state === "ready" ? "asset-chip ready" : "asset-chip bad";
+        const tip = a.state === "ready" ? "素材就绪" : "素材未就绪（实体缺失或哈希不符）";
+        return `<a class="${cls}" title="${tip}" href="/assets">
+          ${kindIcon[a.kind] || "📎"}${a.state === "ready" ? "" : " ⚠"}</a>`;
+      }).join("");
+      const assetCell = assets
+        ? `<span class="asset-group">${assets}</span>`
+        : '<span class="muted">—</span>';
 
       let status;
       if (c.in_cycle) status = '<span class="status-conflict">环！</span>';
@@ -282,6 +333,7 @@
         <td class="num">${fmtTime(c.end)}</td>
         <td class="num">${fmtDur(c.duration)}</td>
         <td>${deps || '<span class="muted">无（开场）</span>'}</td>
+        <td>${assetCell}</td>
         <td>${status}</td>
         <td class="op-col">
           <span class="row-ops">
@@ -317,6 +369,9 @@
     } else {
       addDepRow(null, 0);
     }
+    // 当前绑定素材（schedule 中的 cue 已带 assets，按 position 顺序）
+    state.editingAssets = cue ? (cue.assets || []).map((a) => a.id) : [];
+    renderAssetBindings();
     $("#modalOverlay").classList.remove("hidden");
     setTimeout(() => $("#fDepartment").focus(), 30);
   }
@@ -388,15 +443,23 @@
       return;
     }
     try {
+      let savedId;
       if (state.editingId) {
         await api(`/api/cues/${state.editingId}`, {
           method: "PUT", body: JSON.stringify(payload),
         });
+        savedId = state.editingId;
       } else {
-        await api("/api/cues", {
+        const created = await api("/api/cues", {
           method: "POST", body: JSON.stringify(payload),
         });
+        savedId = created.id;
       }
+      // 保存素材绑定（全量替换该提示的素材集合）
+      await api(`/api/cues/${savedId}/assets`, {
+        method: "PUT",
+        body: JSON.stringify(state.editingAssets),
+      });
       closeEditor();
       await reload();
     } catch (err) {
@@ -428,6 +491,26 @@
     $("#cancelBtn").addEventListener("click", closeEditor);
     $("#cueForm").addEventListener("submit", submitForm);
     $("#addDepBtn").addEventListener("click", () => addDepRow(null, 0));
+
+    const addAssetBind = () => {
+      const sel = $("#assetSelect");
+      const id = Number(sel.value);
+      if (!id) return;
+      if (state.editingAssets.includes(id)) return;
+      state.editingAssets.push(id);
+      renderAssetBindings();
+    };
+    $("#addAssetBtn").addEventListener("click", addAssetBind);
+    $("#assetSelect").addEventListener("change", () => {
+      // 选择后不立即绑定，点「绑定」或回车均可；回车触发绑定
+    });
+    $("#assetBindList").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-rm-asset]");
+      if (!btn) return;
+      const id = Number(btn.dataset.rmAsset);
+      state.editingAssets = state.editingAssets.filter((x) => x !== id);
+      renderAssetBindings();
+    });
     $("#modalOverlay").addEventListener("click", (e) => {
       if (e.target === $("#modalOverlay")) closeEditor();
     });

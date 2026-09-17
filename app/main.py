@@ -9,13 +9,13 @@ import os
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import database, rehearsal
+from . import assets, database, rehearsal
 from .scheduler import CueNode, CyclicDependencyError, build_schedule, detect_cycle
-from .schemas import CueCreate, CueUpdate, RunStart
+from .schemas import CueAssets, CueCreate, CueUpdate, RunStart
 
 app = FastAPI(title="舞台排演提示单", version="1.0.0")
 
@@ -55,6 +55,7 @@ def _reject_if_cyclic(conn) -> None:
 @app.on_event("startup")
 def _startup() -> None:
     database.init_db()
+    assets.ensure_storage()
     if os.environ.get("SEED_DEMO", "1") not in ("0", "false", "False", ""):
         database.seed_demo()
 
@@ -71,7 +72,13 @@ def get_schedule() -> dict:
     """返回提示列表、依赖边、冲突链与成环信息（已完成级联重算）。"""
     with database.db() as conn:
         cues, edges = _fetch_raw(conn)
-    return build_schedule(cues, edges)
+        sched = build_schedule(cues, edges)
+        amap = assets.cue_asset_map(conn, [c["id"] for c in cues])
+    for c in sched["cues"]:
+        alist = amap.get(c["id"], [])
+        c["assets"] = alist
+        c["assets_ready"] = all(a["state"] == assets.READY for a in alist)
+    return sched
 
 
 @app.get("/api/cues/{cue_id}")
@@ -85,8 +92,12 @@ def get_cue(cue_id: int) -> dict:
         deps = [dict(r) for r in conn.execute(
             "SELECT depends_on AS id, delay FROM dependencies "
             "WHERE cue_id = ? ORDER BY depends_on", (cue_id,)).fetchall()]
+        alist = assets.cue_asset_map(conn, [cue_id]).get(cue_id, [])
     result = dict(row)
     result["predecessors"] = deps
+    result["assets"] = alist
+    result["asset_ids"] = [a["id"] for a in alist]
+    result["assets_ready"] = all(a["state"] == assets.READY for a in alist)
     return result
 
 
@@ -222,6 +233,64 @@ def end_run(run_id: int) -> dict:
     return rehearsal.end_run(run_id)
 
 
+# ---------------------------------------------------------------- 提示素材库
+
+@app.post("/api/assets", status_code=201)
+async def upload_asset(request: Request) -> dict:
+    """流式上传素材（multipart/form-data：file + 可选 name）。
+
+    边接收边写临时文件并计算 SHA-256，校验扩展名 / MIME / 大小后原子移入
+    持久化目录；相同哈希只存一份实体，每次上传建立独立条目。
+    """
+    return await assets.create_asset(request)
+
+
+@app.get("/api/assets")
+def list_assets(q: str = "") -> dict:
+    """按名称检索素材（q 为空时返回全部），含实时就绪状态与引用提示。"""
+    return assets.list_assets(q)
+
+
+@app.post("/api/assets/verify")
+def verify_assets() -> dict:
+    """完整性检查：重新计算所有实体 SHA-256，标记缺失 / 哈希不符与孤儿文件。"""
+    return assets.verify_integrity()
+
+
+@app.post("/api/assets/cleanup-orphans")
+def cleanup_orphan_assets() -> dict:
+    """清理完整性检查发现的磁盘孤儿实体文件。"""
+    return assets.cleanup_orphans()
+
+
+@app.get("/api/assets/{asset_id}")
+def get_asset(asset_id: int) -> dict:
+    return assets.get_asset(asset_id)
+
+
+@app.get("/api/assets/{asset_id}/content")
+def asset_content(asset_id: int):
+    """返回实体文件（图片 / 音频 / 视频，FileResponse 支持 Range 拖动播放）。"""
+    path, media_type, download_name = assets.get_asset_for_content(asset_id)
+    from urllib.parse import quote
+    return FileResponse(
+        path, media_type=media_type,
+        headers={"Content-Disposition":
+                 f"inline; filename*=UTF-8''{quote(download_name)}"})
+
+
+@app.delete("/api/assets/{asset_id}")
+def delete_asset(asset_id: int) -> dict:
+    """删除素材条目；被提示引用时 409，删除最后一个同哈希条目时回收实体。"""
+    return assets.delete_asset(asset_id)
+
+
+@app.put("/api/cues/{cue_id}/assets")
+def bind_cue_assets(cue_id: int, payload: CueAssets) -> dict:
+    """全量设置提示绑定的素材（有序、去重）。"""
+    return assets.set_cue_assets(cue_id, payload.asset_ids)
+
+
 # ---------------------------------------------------------------- 静态页面
 
 @app.get("/")
@@ -232,6 +301,11 @@ def index() -> FileResponse:
 @app.get("/console")
 def console() -> FileResponse:
     return FileResponse(STATIC_DIR / "console.html")
+
+
+@app.get("/assets")
+def asset_library() -> FileResponse:
+    return FileResponse(STATIC_DIR / "assets.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

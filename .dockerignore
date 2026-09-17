@@ -4,6 +4,9 @@ __pycache__/
 .git/
 .gitignore
 *.db
+*.db-wal
+*.db-shm
 data/
+assets/
 .env
 README.md

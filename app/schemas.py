@@ -44,3 +44,8 @@ class CueUpdate(CueBase):
 
 class RunStart(BaseModel):
     note: str = Field("", max_length=200, description="本场备注（可选）")
+
+
+class CueAssets(BaseModel):
+    asset_ids: list[int] = Field(
+        default_factory=list, description="绑定的素材 id（有序、不可重复）")

@@ -42,7 +42,10 @@ class BaseModel:
             if name in data:
                 v = data[name]
             else:
-                if default.__class__.__name__ == "list":
+                if isinstance(default, FieldInfo):
+                    factory = default.kw.get("default_factory")
+                    v = factory() if factory is not None else default.default
+                elif default.__class__.__name__ == "list":
                     v = []
                 else:
                     v = default
@@ -75,6 +78,10 @@ class HTTPException(Exception):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"{status_code}: {detail}")
+
+
+class Request:  # 路由签名中出现，stub 下不实例化
+    pass
 
 
 ROUTES = []
@@ -128,6 +135,7 @@ class JSONResponse(Exception):
 
 fastapi.FastAPI = FastAPI
 fastapi.HTTPException = HTTPException
+fastapi.Request = Request
 fastapi.responses = types.ModuleType("fastapi.responses")
 fastapi.responses.FileResponse = FileResponse
 fastapi.responses.JSONResponse = JSONResponse
@@ -175,6 +183,8 @@ expected = [
     ("GET", "/api/health"), ("GET", "/api/schedule"),
     ("POST", "/api/runs"), ("GET", "/api/runs/active"),
     ("GET", "/api/runs/latest"), ("GET", "/console"),
+    ("POST", "/api/assets"), ("GET", "/api/assets"),
+    ("POST", "/api/assets/verify"), ("GET", "/assets"),
 ]
 for m, p in expected:
     check(f"{m} {p} 已注册", any(x[0] == m and x[1] == p for x in ROUTES))
@@ -183,6 +193,10 @@ check("start/complete/end 路由齐全",
       and any("{cue_id}" in r[1] and r[1].endswith("/start") for r in ROUTES)
       and any("{cue_id}" in r[1] and r[1].endswith("/complete") for r in ROUTES)
       and any(r[1].endswith("/end") for r in ROUTES))
+check("素材内容 / 删除 / 绑定路由齐全",
+      any(r[1] == "/api/assets/{asset_id}/content" for r in ROUTES)
+      and any(r[0] == "DELETE" and r[1] == "/api/assets/{asset_id}" for r in ROUTES)
+      and any(r[1] == "/api/cues/{cue_id}/assets" for r in ROUTES))
 
 print("== 启动初始化（演示数据已写入） ==")
 sched = main.get_schedule()
@@ -242,6 +256,16 @@ check("/ 返回 index.html",
       str(main.index().path).endswith("index.html"))
 check("/console 返回 console.html",
       str(main.console().path).endswith("console.html"))
+check("/assets 返回 assets.html",
+      str(main.asset_library().path).endswith("assets.html"))
+
+print("== 素材字段透传到 schedule ==")
+sched2 = main.get_schedule()
+cue = sched2["cues"][0]
+check("schedule 提示含 assets / assets_ready 字段",
+      "assets" in cue and "assets_ready" in cue)
+m = main.CueAssets(asset_ids=[])
+check("CueAssets 模型默认空列表", m.asset_ids == [])
 
 print(f"\n结果：{PASS} 通过，{FAIL} 失败")
 sys.exit(1 if FAIL else 0)

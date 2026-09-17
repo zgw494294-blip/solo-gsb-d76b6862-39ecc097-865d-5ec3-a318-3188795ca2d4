@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>提示素材库 · 舞台排演提示单</title>
+<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/assets.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">🎞️</span>
+    <div>
+      <h1>提示素材库</h1>
+      <p class="subtitle">Asset Library · 本地图片 / 音频 / 视频，按 SHA-256 去重存储</p>
+    </div>
+  </div>
+  <div class="toolbar">
+    <a class="nav-link" href="/">← 返回提示单</a>
+    <a class="nav-link" href="/console">🎬 排演执行台</a>
+  </div>
+</header>
+
+<div id="verifyBanner" class="verify-banner hidden"></div>
+
+<main class="assets-main">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>上传素材</h2>
+      <span class="muted">相同内容只保存一份实体，但可建立多个素材条目 ·
+        单文件上限由服务器配置（默认 200MB）</span>
+    </div>
+    <div class="upload-body">
+      <label id="dropZone" class="drop-zone">
+        <input type="file" id="fileInput" class="hidden"
+               accept="image/*,audio/*,video/*" />
+        <div class="drop-inner">
+          <div class="drop-mark">⬆</div>
+          <div>点击选择，或把文件拖到这里</div>
+          <div class="muted">支持图片（png/jpg/gif/webp）、音频（mp3/wav/ogg/flac/m4a/aac）、
+            视频（mp4/mov/webm/mkv/avi）</div>
+        </div>
+      </label>
+      <div class="upload-side">
+        <label>素材名称（可选，默认用文件名）
+          <input type="text" id="assetName" maxlength="120"
+                 placeholder="如：开场灯光示意图" />
+        </label>
+        <div id="uploadProgress" class="progress hidden">
+          <div class="progress-bar"><div id="progressFill"></div></div>
+          <span id="progressText" class="muted"></span>
+        </div>
+        <div id="uploadError" class="form-error hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>素材列表</h2>
+      <div class="toolbar">
+        <input type="search" id="searchInput" class="search-box"
+               placeholder="按名称检索…" />
+        <button id="verifyBtn" type="button" class="ghost">🔍 完整性检查</button>
+        <button id="cleanupBtn" type="button" class="ghost">🧹 清理孤儿文件</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="assetTable">
+        <thead>
+          <tr>
+            <th>预览</th><th>名称</th><th>类型</th><th>大小</th>
+            <th>SHA-256</th><th>引用提示</th><th>状态</th>
+            <th class="op-col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="assetTbody"></tbody>
+      </table>
+      <div id="assetEmpty" class="empty-hint hidden">暂无素材，先在上方上传一个文件</div>
+    </div>
+    <div class="panel-foot muted">
+      <span id="assetCount"></span>
+      <span>· 相同哈希的多个条目共享同一实体；删除最后一个条目才回收实体</span>
+    </div>
+  </section>
+</main>
+
+<!-- 绑定弹窗 -->
+<div id="bindOverlay" class="modal-overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="bindTitle">绑定到提示</h3>
+    <p class="hint">勾选要引用该素材的提示（可多选）。被任意提示引用的素材条目不可删除。</p>
+    <div id="bindList" class="bind-list"></div>
+    <div id="bindError" class="form-error hidden"></div>
+    <div class="modal-actions">
+      <button type="button" id="bindCancel" class="ghost">取消</button>
+      <button type="button" id="bindSave" class="primary">保存绑定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预览弹窗 -->
+<div id="previewOverlay" class="modal-overlay hidden">
+  <div class="modal preview-modal" role="dialog" aria-modal="true">
+    <h3 id="previewTitle">预览</h3>
+    <div id="previewBody" class="preview-body"></div>
+    <div class="modal-actions">
+      <a id="previewDownload" class="nav-link" download>在新标签打开 / 下载</a>
+      <button type="button" id="previewClose" class="primary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/assets.js"></script>
+</body>
+</html>

@@ -21,7 +21,7 @@ import time
 
 from fastapi import HTTPException
 
-from . import database
+from . import assets, database
 from .scheduler import build_schedule
 
 # 状态
@@ -57,11 +57,15 @@ def _derive_states(
     snap_cues: list[dict],
     snap_deps: list[dict],
     elapsed: float,
+    blocked: set[int] | None = None,
 ) -> dict[int, dict]:
     """按快照依赖与实际执行记录推导每条提示的实时状态。
 
     返回 cue_id -> {status, ready_in, threshold, preds: [{id, delay, done}]}。
+    ``blocked`` 中的提示（其绑定素材未就绪）一律降级为 waiting，即使满足
+    依赖与场钟也不可开始。
     """
+    blocked = blocked or set()
     ids = {c["id"] for c in snap_cues}
     preds: dict[int, list[tuple[int, float]]] = {cid: [] for cid in ids}
     for d in snap_deps:
@@ -106,6 +110,9 @@ def _derive_states(
             status = COMPLETED
         elif c["status"] == RUNNING:
             status = RUNNING
+        elif cid in blocked:
+            # 绑定素材缺失/损坏：强制未就绪，不显示倒计时
+            status = WAITING
         else:  # 库中 waiting；是否已就绪看前置与场钟
             no_gate = not plist and c["locked_start"] is None
             if no_gate or (preds_all_done and elapsed + 1e-6 >= threshold):
@@ -114,7 +121,7 @@ def _derive_states(
                 status = WAITING
 
         ready_in = None
-        if status == WAITING:
+        if status == WAITING and cid not in blocked:
             if preds_all_done:  # 前置均已完成，只差场钟到点
                 ready_in = round(max(0.0, threshold - elapsed), 1)
             # 尚有前置未完成 -> ready_in 保持 null（无法预估）
@@ -123,6 +130,7 @@ def _derive_states(
             "ready_in": ready_in,
             "threshold": round(threshold, 3),
             "preds": pred_info,
+            "blocked": cid in blocked,
         }
     return info
 
@@ -152,7 +160,13 @@ def _assemble(conn, row) -> dict:
                   "delay": d["delay"]} for d in snap_deps]
     sched = build_schedule(raw_cues, raw_edges)
 
-    derived = _derive_states(snap_cues, snap_deps, elapsed)
+    # 素材就绪状态（按当前磁盘实况判定快照中冻结的素材）
+    asset_map = assets.run_cue_asset_map(conn, run_id)
+    blocked = {
+        cid for cid, alist in asset_map.items()
+        if any(a["state"] != assets.READY for a in alist)}
+
+    derived = _derive_states(snap_cues, snap_deps, elapsed, blocked)
     stored_map = {c["id"]: c for c in snap_cues}
 
     cues_out = []
@@ -174,6 +188,7 @@ def _assemble(conn, row) -> dict:
             end_dev = round(elapsed - pc["end"], 3)
         else:
             end_dev = None
+        cue_assets_list = asset_map.get(cid, [])
         cues_out.append({
             **pc,
             "status": dv["status"],
@@ -183,6 +198,8 @@ def _assemble(conn, row) -> dict:
             "actual_end": actual_end,
             "start_deviation": start_dev,
             "end_deviation": end_dev,
+            "assets": cue_assets_list,
+            "assets_ready": all(a["state"] == assets.READY for a in cue_assets_list),
         })
 
     done = sum(1 for c in snap_cues if c["status"] == COMPLETED)
@@ -264,6 +281,8 @@ def start_run(note: str = "") -> dict:
                     "INSERT INTO run_deps (run_id, cue_id, depends_on, delay)"
                     " VALUES (?, ?, ?, ?)",
                     (run_id, e["cue_id"], e["depends_on"], e["delay"]))
+            # 冻结当前提示↔素材绑定（快照；之后改绑定不影响本场）
+            assets.freeze_run_assets(conn, run_id)
             conn.commit()
             row = conn.execute("SELECT * FROM runs WHERE id = ?",
                                (run_id,)).fetchone()
@@ -302,6 +321,13 @@ def get_run(run_id: int) -> dict:
         return _assemble(conn, row)
 
 
+def _blocked_cue_ids(conn, run_id: int) -> set[int]:
+    """本场快照中存在未就绪素材的提示 id 集合。"""
+    amap = assets.run_cue_asset_map(conn, run_id)
+    return {cid for cid, alist in amap.items()
+            if any(a["state"] != assets.READY for a in alist)}
+
+
 def _require_active_cue(conn, run_id: int, cue_id: int):
     row = conn.execute("SELECT * FROM runs WHERE id = ?",
                        (run_id,)).fetchone()
@@ -328,7 +354,13 @@ def cue_start(run_id: int, cue_id: int) -> dict:
                 raise HTTPException(409, f"提示 #{cue_id} 已在执行中")
             snap_cues, snap_deps = _load_snapshot(conn, run_id)
             elapsed = _now_offset(float(row["origin_epoch"]))
-            derived = _derive_states(snap_cues, snap_deps, elapsed)
+            derived = _derive_states(
+                snap_cues, snap_deps, elapsed,
+                _blocked_cue_ids(conn, run_id))
+            if derived[cue_id].get("blocked"):
+                raise HTTPException(
+                    409, f"提示 #{cue_id} 绑定的素材未就绪（实体缺失或校验不符），"
+                         "请在素材库完成完整性检查并修复后再开始")
             if derived[cue_id]["status"] != READY:
                 reason = "仍有前置提示未完成"
                 if derived[cue_id]["ready_in"] is not None:

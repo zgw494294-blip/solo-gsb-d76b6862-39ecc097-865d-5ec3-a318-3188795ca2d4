@@ -5,7 +5,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
-    CUE_DB_PATH=/data/cues.db
+    CUE_DB_PATH=/data/cues.db \
+    ASSET_STORAGE_DIR=/data/assets \
+    ASSET_MAX_SIZE=209715200
 
 WORKDIR /app
 

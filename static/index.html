@@ -29,6 +29,7 @@
       <span class="zoom-label"><span id="zoomVal">6</span> px/秒</span>
     </div>
     <button id="addBtn" class="primary" type="button">＋ 新增提示</button>
+    <a class="nav-link" href="/assets">🎞️ 素材库</a>
     <a class="nav-link" href="/console">🎬 排演执行台</a>
   </div>
 </header>
@@ -66,7 +67,7 @@
           <tr>
             <th>#</th><th>部门</th><th>名称</th>
             <th>开始</th><th>结束</th><th>时长</th>
-            <th>前置（延迟）</th><th>状态</th><th class="op-col">操作</th>
+            <th>前置（延迟）</th><th>素材</th><th>状态</th><th class="op-col">操作</th>
           </tr>
         </thead>
         <tbody id="cueTbody"></tbody>
@@ -108,6 +109,21 @@
       <div id="depRows"></div>
       <p class="hint">未锁定时，开始时间 = 所有前置「结束 + 延迟」的最大值。
         保存时若新增依赖形成环将被拒绝。</p>
+
+      <div class="dep-head" style="margin-top:14px">
+        <span>绑定素材（本地图片 / 音频 / 视频）</span>
+        <a class="nav-link" href="/assets" target="_blank"
+           style="padding:3px 10px;font-size:12px">打开素材库 ↗</a>
+      </div>
+      <div class="asset-bind-row">
+        <select id="assetSelect" class="f-input">
+          <option value="">选择要绑定的素材…</option>
+        </select>
+        <button type="button" id="addAssetBtn" class="ghost">＋ 绑定</button>
+      </div>
+      <div id="assetBindList" class="asset-bind-list"></div>
+      <p class="hint" id="assetBindHint">绑定素材若实体缺失或 SHA-256 校验不符，
+        该提示在提示单与执行台都会显示「素材未就绪」，执行台将禁止开始。</p>
 
       <div id="formError" class="form-error hidden"></div>
       <div class="modal-actions">

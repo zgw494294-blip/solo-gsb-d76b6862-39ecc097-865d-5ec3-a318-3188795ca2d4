@@ -138,6 +138,7 @@ tr.row-ready { background: rgba(232,163,61,.06); }
 tr.row-running { background: rgba(76,175,125,.07); }
 tr.row-running td { box-shadow: inset 3px 0 0 var(--ok); }
 tr.row-completed { opacity: .72; }
+tr.row-asset-bad td { box-shadow: inset 3px 0 0 var(--chain); }
 
 .dev { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dev.early { color: #7fe0ad; }

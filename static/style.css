@@ -285,6 +285,29 @@ td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .status-ok { color: var(--ok); font-size: 12px; }
 .status-locked { color: var(--locked); font-size: 12px; }
 .status-conflict { color: var(--chain); font-size: 12px; font-weight: 600; }
+
+/* --------------------------------------------------------------- 素材 */
+.asset-group { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.asset-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  border-radius: 5px; padding: 1px 7px; font-size: 12px;
+  text-decoration: none; border: 1px solid transparent;
+}
+.asset-chip.ready {
+  background: rgba(76,175,125,.12); border-color: rgba(76,175,125,.35);
+  color: #9fe0bd;
+}
+.asset-chip.bad {
+  background: var(--danger-bg); border-color: rgba(255,90,90,.5);
+  color: #ffb3b3; font-weight: 600;
+}
+.asset-chip.removable button {
+  border: none; background: transparent; color: inherit;
+  padding: 0 0 0 4px; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.asset-bind-row { display: flex; gap: 8px; margin: 6px 0 4px; }
+.asset-bind-row select { flex: 1 1 auto; }
+.asset-bind-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; min-height: 22px; }
 .op-col { text-align: right; }
 .row-ops { display: flex; gap: 6px; justify-content: flex-end; }
 .row-ops button { padding: 4px 10px; font-size: 12px; }
